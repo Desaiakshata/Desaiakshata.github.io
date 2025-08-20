@@ -1,0 +1,354 @@
+
+<p class="title">AI ML Blogs</p>
+<hr>
+
+<!-- <link rel="stylesheet" href="https://dev.prismjs.com/themes/prism.css" />
+<script src="/static/home/prism.js"></script> -->
+<link rel="stylesheet" href="/static/home/vs.css">
+<script src="/static/home/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<link rel="stylesheet" href="/static/home/style.scss">
+
+<h2>Implementing Byte Pair Tokenization</h2>
+<p></p>
+<p><p>Large language models process text input to generate text outputs. These models are trained using text. However, the input is converted to vectors before being consumed by the models.</p>
+
+<p>Sentences are tokenized using various text tokenization algorithms. These tokens make up the vocabulary used to train the model. A Token could represent either a whole word or a word piece. Generative text models are trained using these tokens considering the current token as the input and next token as a golden target. </p>
+
+<p>Text can be split based on certain rules.</p></p>
+<pre class="codepanel"></pre>
+
+    
+        <pre class="codepanel"><code class="language-python">Input Text: low lower brighter wider. slow slower slowly.
+
+- Split at whitespace, punctuations
+
+Vocabulary:
+low, lower, brighter, wider, .,slow, slower, slowly</code></pre>
+    
+
+    
+        <p>In this blog we discuss another text tokenization technique, byte pair encoding (BPE). BPE was first demonstrated in 1994 by Gage[1]. In this technique sentences are first split into characters. A dictionary of word/character pair counts is created by taking into account the current character and the next character. This is followed by merging frequently occurring pairs. After k merges, a vocabulary is created using the merged word pieces.</p>
+    
+
+    
+        <pre class="codepanel"><code class="language-python">Text input: low lower brighter wider.
+
+Counts:     Merge:  Vocabulary:
+3 - (e,r)   er      l, o, w, er, b, r, 
+2 - (l,o)           i, g, h, t, w, i, d
+2 - (o,w)
+
+Counts:     Merge:  Vocabulary:
+2 - (l,o)   lo      lo, w, er, b, r, i,
+2 - (o,w)           g, h, t, w, i, d
+
+Counts:     Merge:  Vocabulary:
+2 - (lo,w)  low     low, er, b, r, i,
+                    g, h, t, w, i, d</code></pre>
+    
+
+    
+        <p class="section">2. Code Implementations for BPE</p>
+    
+
+    
+        <p>BPE implements two methods get_counts and merge. get_counts is used to count the frequency of character pairs. merge is used to merge the pair with the highest frequency. k is the number of merges that need to be applied to the training data.</p>
+    
+
+    
+        <pre class="codepanel"><code class="language-python">def get_counts(self, words):
+        &quot;&quot;&quot;
+        Given word encodings: [[1,2,3,1,2], [2,3,1,2]],
+        This function builds a table of character pair counts
+        
+        Parameters:
+        words: words occuring in input text
+        &quot;&quot;&quot;
+        freq = {}
+        for word in words:
+            for s1,s2 in zip(word,word[1:]):
+                freq[(s1,s2)] = freq.get((s1,s2),0) + 1
+        freq = {k:v for k,v in sorted(freq.items(), key=lambda i: i[1], reverse=True)}
+        return freq
+
+def merge(self, words, pair, idx):
+        &quot;&quot;&quot;
+        Merges the most frequently occuring subword pairs
+        -&gt; [[1,2,3,1,2], [2,3,1,2]] to [[4,3,4],[2,3,4]]
+        
+        Parameters:
+        words: words occuring in input text
+        pair: most frequently occurring subword pairs
+        idx: id for the new merged pair
+        &quot;&quot;&quot;
+        for i in range(len(words)):
+            word = words[i]
+            for j, (s1, s2) in enumerate(zip(word, word[1:])):
+                if (s1,s2)==pair:
+                    tmp = &#x27;,&#x27;.join([str(w) for w in word])
+                    tmp.replace(str(word[j])+&#x27;,&#x27;+str(word[j+1]), str(idx))
+                    words[i] = [int(w) for w in tmp.split(&#x27;,&#x27;)]
+                    break
+        return words</code></pre>
+    
+
+    
+        <p>Since training data has millions of word repetitions, most of the words are retained as whole. Some rarely occurring words are split into word pieces. This merge data is then used to run on test data.</p>
+    
+
+    
+        <p class="section">3. Training a BPE Tokenizer</p>
+    
+
+    
+        <p>Implementation for the BPE trainer is shown below. Input text is represented as the 256 ASCII characters in the form of bytes or integer indices. Most frequently occurring consecutive character pairs are merged to form new IDs. After k merges, we have a new vocabulary for the training data with updated merged character tokens.  Test data is then tokenized in a greedy approach by applying the learnt merges.</p>
+    
+
+    
+        <pre class="codepanel"><code class="language-python">class BPE:
+    def __init__(self, num_merges, vocab=None, merges=None):
+        gpt2_pattern = r&quot;&quot;&quot;&#x27;(?:[sdmt]|ll|ve|re)| ?\p{L}++| ?\p{N}++| ?[^\s\p{L}\p{N}]++|\s++$|\s+(?!\S)|\s&quot;&quot;&quot;
+        self.vocab = {i:bytes([i]) for i in range(256)} if not vocab else vocab
+        self.num_merges = num_merges
+        self.pattern = regex.compile(gpt2_pattern)
+        self.merges = [] if not merges else merges
+        self.custom_vocab = vocab
+        print(len(self.merges))
+
+    def get_counts(self, words):
+        &quot;&quot;&quot;
+        Given word encodings: [[1,2,3,1,2], [2,3,1,2]],
+        This function builds a table of character pair counts
+        
+        Parameters:
+        words: words occuring in input text
+        &quot;&quot;&quot;
+        freq = {}
+        for word in words:
+            for s1,s2 in zip(word,word[1:]):
+                freq[(s1,s2)] = freq.get((s1,s2),0) + 1
+        freq = {k:v for k,v in sorted(freq.items(), key=lambda i: i[1], reverse=True)}
+        return freq
+    
+    def merge(self, words, pair, idx):
+        &quot;&quot;&quot;
+        Merges the most frequently occuring subword pairs
+        -&gt; [[1,2,3,1,2], [2,3,1,2]] to [[4,3,4],[2,3,4]]
+        
+        Parameters:
+        words: words occuring in input text
+        pair: most frequently occurring subword pairs
+        idx: id for the new merged pair
+        &quot;&quot;&quot;
+        for i in range(len(words)):
+            word = words[i]
+            for j, (s1, s2) in enumerate(zip(word, word[1:])):
+                if s1==pair[0] and s2==pair[1]:
+                    words[i] = json.loads(re.sub(fr&#x27;{s1}, {s2}&#x27;, str(idx), str(words[i])))
+                    break
+        self.vocab[idx] = self.vocab[pair[0]]+self.vocab[pair[1]]
+        return words
+        
+    def train(self, text):
+        words = []
+        for word in regex.findall(self.pattern, text):
+            words.append(list(word.encode(&quot;utf-8&quot;)))
+        c = 256
+        for i in range(self.num_merges):
+            stats = self.get_counts(words)
+            pair = max(stats, key=stats.get)
+            words = self.merge(words, pair, c)
+            self.merges.append(pair)
+            c+=1
+        return self.vocab, self.merges
+
+    def encode(self, text):
+        &quot;&quot;&quot;
+        This functin encodes the text provided,
+        using the merges learnt during training 
+        into integer tokens.
+        &quot;&quot;&quot;
+        words = []
+        reverse_vocab = {v:k for k,v in self.vocab.items()}
+        try:
+            for word in regex.findall(self.pattern, text):
+                if not self.custom_vocab: words.append(list(word.encode(&quot;utf-8&quot;)))
+                else: words.append([reverse_vocab[w.encode(&quot;utf-8&quot;)] for w in word])
+            for m in self.merges:
+                words = self.merge(words, m, reverse_vocab[self.vocab[m[0]]+self.vocab[m[1]]])
+        except Exception as e:
+            print(f&quot;Error {e}&quot;)
+        return words
+
+    def decode(self, ids):
+        &quot;&quot;&quot;
+        This function decodes integer tokens
+        to generate text.
+        &quot;&quot;&quot;
+        text = bytes([])
+        for id_ in ids:
+            t = bytes([])
+            for i in id_:
+                t+=self.vocab[i]
+            text += t
+        print(text) 
+        return text</code></pre>
+    
+
+    
+        <p>Sample training given the sentence with 5 merges</p>
+    
+
+    
+        <pre class="codepanel"><code class="language-python">bpe = BPE(5)
+vocab, merges = bpe.train(&quot;low lower wider brighter newer&quot;)</code></pre>
+    
+
+    
+        <p>Generate encoding for the word &quot;lower&quot;</p>
+    
+
+    
+        <pre class="codepanel"><code class="language-python">bpe.encode(&quot;lower&quot;)</code></pre>
+    
+
+    
+        <pre class="codeout"># Original tokens: [[108, 111, 119, 101, 114]]
+[[258, 256]]</pre>
+    
+
+    
+        <p>&quot;lower&quot; is initially tokenized into 5 tokens which are then merged to 2. </p>
+    
+
+    
+        <pre class="codepanel"><code class="language-python">[vocab[i] for k in bpe.encode(&quot;lower&quot;) for i in k]</code></pre>
+    
+
+    
+        <pre class="codeout">[b&#x27;low&#x27;, b&#x27;er&#x27;]</pre>
+    
+
+    
+        <p>&quot;lower&quot; is tokenized as &quot;low&quot; and &quot;er&quot;.
+We can decode the integer tokens back to words.</p>
+    
+
+    
+        <pre class="codepanel"><code class="language-python">bpe.decode(bpe.encode(&quot;lower&quot;))</code></pre>
+    
+
+    
+        <pre class="codeout">b&#x27;lower&#x27;</pre>
+    
+
+    
+        <p>We can cross verify these implementations using the GPT2 vocab and merges. Download the merges, vocab and load them into the trainer.</p>
+    
+
+    
+        <pre class="codepanel"><code class="language-python">vocab_bpe_file=&quot;https://openaipublic.blob.core.windows.net/gpt-2/encodings/main/vocab.bpe&quot;,
+encoder_json_file=&quot;https://openaipublic.blob.core.windows.net/gpt-2/encodings/main/encoder.json&quot;
+with open(&quot;path/to/encoder.json&quot;, &quot;r&quot;, encoding=&quot;utf-8&quot;) as f:
+    vocab = json.load(f)
+vocab = {k.replace(&quot;Ġ&quot;,&#x27; &#x27;).encode(&quot;utf-8&quot;):v for k,v in vocab.items()}
+r_vocab = {v:k for k,v in vocab.items()}
+with open(&quot;path/to/vocab.bpe&quot;, &quot;r&quot;, encoding=&quot;utf-8&quot;) as f:
+    merges = []
+    for i,line in enumerate(f.readlines()[1:]):
+        s1,s2 = line.split()
+        s1 = s1.replace(&quot;Ġ&quot;,&quot; &quot;).encode(&quot;utf-8&quot;)
+        s2 = s2.replace(&quot;Ġ&quot;,&quot; &quot;).encode(&quot;utf-8&quot;)
+        merges.append((vocab[s1],vocab[s2]))
+bpe = BPE(5, r_vocab, merges)</code></pre>
+    
+
+    
+        <p>Try encoding and decoding using the loaded data.</p>
+    
+
+    
+        <pre class="codepanel"><code class="language-python">bpe.decode(bpe.encode(&quot;syllables&quot;))</code></pre>
+    
+
+    
+        <pre class="codeout"># encode token - [[1837, 297, 2977]]
+b&#x27;syllables&#x27;</pre>
+    
+
+    
+        <p>We can verify using the tokenizer on OpenAI platform.</p>
+    
+
+    
+
+    
+
+<img src="/static/home/tokenizer.png">
+<p class="section">References</p>
+<ol>
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+    
+        
+            <li><p>Philip Gage. 1994. A New Algorithm for Data Compression. C Users J., 12(2):23–38, February.</p></li>
+        
+    
+        
+            <li><p>OpenAI Tokenizer UI https://platform.openai.com/tokenizer</p></li>
+        
+    
+</ol>
